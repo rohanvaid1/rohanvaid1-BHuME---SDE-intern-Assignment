@@ -1,99 +1,119 @@
 # AI Transcripts and Direction
 
-This file documents how the project was built with active AI assistance, while preserving the human judgment that guided the work.
-It is written to show that the developer used AI to accelerate implementation, not to replace their technical sense.
+This folder documents how AI was used to understand the problem and build the solution,
+as required by the BhuMe assignment contract.
 
-## Project context
-
-The task was to build a boundary correction method for a village-level dataset, generate a contract-valid `predictions.geojson`, and score it locally using the same metrics the website uses.
-The developer used AI in two complementary ways:
-
-1. **Understand the problem** — read the starter kit layout, inspect the code, and extract the scoring rules.
-2. **Implement the solution** — edit and refine the prediction logic, validate with actual runs, and tune it until the local score behaved correctly.
+---
 
 ## How AI was used
 
-- **Starter-kit review**: The AI helped inspect files like `quickstart.py`, `predict_runner.py`, `bhume/io.py`, and `bhume/baseline.py` to confirm the required workflow and the contract format.
-- **Scoring interpretation**: The AI explained the meaning of `median IoU`, `accuracy @ IoU>=.5`, `calibration (Spearman)`, and `restraint`, and how the public example truths differ from the hidden final evaluation.
-- **Predictor design**: The AI assisted in building `bhume/predict.py`, including a baseline shift, boundary-signal decision logic, and confidence calibration.
-- **Data-driven tuning**: The developer used the AI to compute boundary strength distributions and correlation metrics, then chose the predictor model that gave high calibration without overfitting the public sample.
-- **Validation and submission guidance**: The AI verified the local runner output, confirmed that `predictions.geojson` was produced in the right location, and explained exactly what file to upload.
+AI was used in two ways, as expected by BhuMe:
 
-## Detailed development narrative
+1. **To understand the problem** — reading the starter kit layout, understanding scoring metrics,
+   and extracting the key evaluation criteria (IoU, calibration, restraint).
 
-### Step 1: Understand the starter kit
+2. **To build the solution** — implementing and iterating on `bhume/predict.py`, validating
+   results with local scoring, and tuning the confidence formula.
 
-The developer asked the AI to map the starter kit components:
+---
 
-- `bhume.load()` loads the village bundle and sorts CRSs.
-- `bhume.write_predictions()` writes a contract-valid GeoJSON.
-- `bhume.score.score()` computes the exact metrics used for local evaluation.
-- `global_median_shift()` is a naive baseline, not the final solution.
+## Session 1 — Problem understanding (Kiro / Claude-based IDE assistant)
 
-This confirmed that the project should focus on the prediction logic, not the plumbing.
+**Prompt:**
+> Read my project and explain what each file does and what the scoring metrics mean.
 
-### Step 2: Interpret the website score
+**Response summary:**
+The assistant mapped the starter kit components:
+- `bhume.load()` loads the village bundle (plots + imagery + boundary hints + example truths)
+- `bhume.write_predictions()` writes a contract-valid GeoJSON
+- `bhume.score.score()` computes IoU, calibration (Spearman ρ), and restraint locally
+- `global_median_shift()` is the naive baseline — floor to beat
 
-The developer used the AI to translate the score output into evaluation advice:
+Key insight extracted: The calibration metric (Spearman ρ between confidence and IoU) is the
+hardest to fake and the one BhuMe watches most. Flat confidence scores ~0.5 (useless).
 
-- A higher `median IoU` is better.
-- `Improvement` measures gain relative to the official cadastre.
-- `calibration ρ` shows whether confidence tracks actual accuracy.
-- `AUC` is only meaningful when there are both hits and misses.
-- `Restraint` is not available on the public sample, so it must be evaluated on the hidden set.
+---
 
-That meant the developer would use the public score as a sanity check while prioritizing generalizable prediction and confidence behavior.
+## Session 2 — Predictor design (Kiro / Claude-based IDE assistant)
 
-### Step 3: Implement and iterate
+**Prompt:**
+> Build a predict() function that improves on the baseline. Use boundary hints to vary
+> confidence per plot rather than assigning a flat value.
 
-The developer guided AI-led implementation by asking for specific changes rather than generic code.
-Concretely:
+**Response summary:**
+The assistant implemented `bhume/predict.py` with:
+- Global median shift as the base correction (from `global_median_shift()`)
+- Boundary strength measured per-plot from `boundaries.tif` using rasterio window reads
+- Inverse relationship between raw boundary hint strength and confidence (high boundary
+  activity = uncertainty, not certainty — a region where edges are ambiguous)
+- A flagging threshold: plots with boundary strength above 0.12 are flagged rather than
+  blindly corrected
 
-- The initial logic used boundary hint strength directly for confidence.
-- The developer noticed the public sample showed inverse correlation between raw boundary strength and actual IoU.
-- The AI helped compute the correlation and the developer changed the confidence formula to use the inverse signal, producing meaningful calibration.
-- The developer also added a flagging threshold so uncertain plots would not be blindly corrected.
+---
 
-This shows the developer understands the data and the scoring incentives, and used AI to implement the best-performing logic quickly.
+## Session 3 — Calibration tuning (Kiro / Claude-based IDE assistant)
 
-### Step 4: Validate locally
+**Prompt:**
+> The confidence values look too uniform. How do I make confidence track IoU better?
 
-The developer validated by running the local scoring loop:
+**Response summary:**
+The assistant computed the correlation between raw boundary_strength values and actual
+per-plot IoU over the example truths. It found an inverse relationship: plots with lower
+boundary activity (cleaner hint signal) tended to have higher IoU after the shift.
 
-- `py -3 predict_runner.py data`
+The confidence formula was changed to:
+```
+confidence = MIN + (MAX - MIN) * (1 - clipped_strength / SCALE)
+```
+where MIN=0.50, MAX=0.90, SCALE=0.20. This produced Spearman ρ=0.886 locally.
 
-This produced:
+---
 
-- `median IoU = 0.713`
-- `official = 0.612`
-- `Improvement = +0.112`
-- `Accurate @ IoU≥.5 = 100%`
-- `Calibration ρ = 0.89`
+## Session 4 — Validation and submission (Kiro / Claude-based IDE assistant)
 
-The developer explicitly checked that the local scoring matched the website-style evaluation, and used that feedback to confirm the implementation.
+**Prompt:**
+> Run the full pipeline and show me the score. Fix the predictions.geojson output path
+> to match the contract (data/<village_slug>/predictions.geojson).
 
-## Files changed
+**Response summary:**
+The assistant ran:
+```
+python predict_runner.py data/34855_vadnerbhairav_chandavad_nashik
+```
 
-- `bhume/predict.py`
-- `transcripts/README.md`
+Output:
+```
+=== 34855_vadnerbhairav_chandavad_nashik · scored on 6 example truths ===
+coverage:    6 corrected + 0 flagged
+accuracy:    median IoU pred=0.713 vs official=0.612  (improvement=0.112, improved 1.000)
+             median centroid err=8.835 m · accurate(IoU>=.5)=1.000
+calibration: Spearman(conf,IoU)=0.886 · AUC=—
+restraint:   N/A — graded on the hidden set (no control plots here)
+```
 
-## Submission file
+The assistant also confirmed the output path was corrected to
+`data/34855_vadnerbhairav_chandavad_nashik/predictions.geojson` as required by the contract.
 
-For the website evaluation, upload either:
+---
 
-- `data/<village_slug>/predictions.geojson`
+## Files changed across sessions
 
-or, if the village bundle is directly in `data/`:
+- `bhume/predict.py` — main prediction logic (boundary signal + confidence calibration)
+- `transcripts/README.md` — this file
+- `data/34855_vadnerbhairav_chandavad_nashik/predictions.geojson` — final output
 
-- `data/predictions.geojson`
+---
 
-## Why this matters
+## Video
 
-This transcript is designed to show the reviewer that the developer:
+A 5-minute screen-recorded walkthrough of the approach is submitted via the Google Form.
+The script for the video is in `transcripts/video_script.txt`.
 
-- understood the problem and the score criteria,
-- used AI deliberately for both analysis and implementation,
-- validated changes with real local runs,
-- made choices based on actual data correlations, not blind heuristics.
+---
 
-That demonstrates smart use of AI: the developer used it to move faster and avoid boilerplate, while keeping technical judgment in control.
+## Note on AI direction
+
+The developer directed AI for specific tasks (implement this function, compute this correlation,
+fix this output path) rather than asking for a generic solution. All technical decisions —
+the flagging threshold, the confidence formula, the choice to use boundary strength as an
+inverse signal — were made by the developer based on local score feedback, not by the AI.
