@@ -1,0 +1,31 @@
+Hi, I’m Prash, and I want to walk you through the BhuMe starter-kit project in a way that feels natural and honest.
+
+I opened this task by reading what the starter kit was asking for: we are given village plot outlines that are shifted away from the real farm boundaries, and our job is to return the best estimate of each plot’s true ground boundary, plus a confidence score and a flag for any plots we can’t place reliably.
+
+At the beginning I treated this like a small engineering problem, not just a code challenge. The starter kit already gives the plumbing: loading the village bundle, reading `imagery.tif`, reading the boundary hints, and writing the prediction GeoJSON. That meant my time should be spent on the actual prediction logic — the thing that changes the boundary and produces meaningful confidence.
+
+I spent the first phase understanding the workflow and the score. The kit’s `bhume.io` and `bhume.score` modules make it clear how the website will evaluate the submission: median IoU against example truths, improvement over the official plot, and confidence calibration. The local score is a rough check, and the real evaluation uses a hidden set, so I wanted a solution that felt robust rather than one that just overfit a few public examples.
+
+The core idea I used was to combine a baseline shift with a boundary-hint signal. The baseline is a global median shift, which is the simplest thing to do: move every plot by the same average offset. That gives a starting point that is usually better than the official plot because the whole village bundle is often consistently shifted.
+
+Then I layered in the boundary hints. The hints are useful where they are strong, but they are not perfect. I looked at the relationship between hint strength and actual plot accuracy, and I found that raw hint strength did not always mean better prediction. So I adjusted the confidence calculation to reflect that: strong hints can help, but the right confidence should be low when the hint is unreliable.
+
+I also added a small safety check. If a plot’s uncertainty was too high, I did not force a big correction. That means the model can say, "I’m not sure about this one," instead of making a risky correction and getting penalized by the score.
+
+The code changes are in `bhume/predict.py`. The `predict_runner.py` script is what I used to run the pipeline and generate the output. It loads the village, makes predictions, writes `predictions.geojson`, and computes the local scores using the same metrics from the starter kit.
+
+I validated the results locally with this command:
+
+```
+py -3 predict_runner.py data
+```
+
+The local score showed a clear improvement over the official plots. The takeaway was that the method was not only doing better on the shift itself, but also producing confidence that tracked accuracy in a useful way.
+
+I also made sure the repository was in clean shape and that the required files were ready to submit. The important files are the source code in `bhume/`, the runner script, and the generated `predictions.geojson` output. I kept a transcript in `transcripts/README.md` to explain how the work was guided and why I made the choices I did.
+
+Finally, I tried to push the final project to the requested GitHub repo. When I attempted to push to `rohanvaid2/Bhume`, I received a permission error because my GitHub account does not have push access to that repo. I then pushed the project to my own repo under my GitHub account so that the code is safely stored and versioned.
+
+In summary, this project is about more than writing code: it is about understanding the starter kit, interpreting the score, and building a prediction approach that is sensible and defensible. I used AI to speed up the review and implementation, but I kept the decision-making and the tuning in my own hands. That is the result I want to share in this video.
+
+Thank you for watching.
